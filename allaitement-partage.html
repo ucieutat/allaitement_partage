@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#FAF6F2">
+<title>Dernier sein</title>
+<style>
+  :root {
+    --bg: #FAF6F2; --card: #FFFFFF; --ink: #3A2E39; --ink-soft: #7A6C77;
+    --left: #C97B84; --left-soft: #F3DEE1; --right: #5E8C86; --right-soft: #DCEAE7;
+    --line: #EAE2DC;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #221D22; --card: #2C262C; --ink: #F3ECEE; --ink-soft: #B3A6AE;
+      --left-soft: #4A3236; --right-soft: #2C3E3A; --line: #3C343B;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: env(safe-area-inset-top, 24px) 20px env(safe-area-inset-bottom, 24px);
+    min-height: 100%;
+  }
+  .wrap { width: 100%; max-width: 420px; margin-top: 8vh; }
+  h1 { font-size: 1.05rem; font-weight: 600; color: var(--ink-soft); text-align: center; margin: 0 0 6px; }
+  .sync { text-align: center; font-size: 0.72rem; color: var(--ink-soft); margin-bottom: 18px; }
+  .status { text-align: center; margin-bottom: 28px; }
+  .status .side { font-size: 1.9rem; font-weight: 700; margin: 4px 0 2px; }
+  .status .time { font-size: 0.95rem; color: var(--ink-soft); }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 22px; }
+  button.side-btn {
+    position: relative; border: none; border-radius: 20px; padding: 34px 8px;
+    font-size: 1.15rem; font-weight: 700; color: var(--ink); cursor: pointer;
+    transition: transform 0.08s ease;
+  }
+  button.side-btn:active { transform: scale(0.96); }
+  button.side-btn:disabled { opacity: 0.5; }
+  .btn-left { background: var(--left-soft); }
+  .btn-right { background: var(--right-soft); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 8px; vertical-align: middle; }
+  .dot-left { background: var(--left); }
+  .dot-right { background: var(--right); }
+  .badge {
+    position: absolute; top: 10px; right: 10px; font-size: 0.62rem; font-weight: 700;
+    letter-spacing: 0.02em; background: var(--card); color: var(--ink-soft);
+    padding: 3px 8px; border-radius: 999px;
+  }
+  .undo {
+    display: block; margin: 0 auto 30px; background: none; border: none;
+    color: var(--ink-soft); font-size: 0.85rem; text-decoration: underline;
+    text-underline-offset: 3px; cursor: pointer;
+  }
+  .history { background: var(--card); border-radius: 16px; padding: 6px 18px; }
+  .history h2 { font-size: 0.85rem; font-weight: 600; color: var(--ink-soft); padding: 12px 0 6px; margin: 0; }
+  .entry {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-top: 1px solid var(--line); font-size: 0.92rem;
+  }
+  .entry:first-of-type { border-top: none; }
+  .entry .who { display: flex; align-items: center; }
+  .entry .when { color: var(--ink-soft); }
+  .empty { color: var(--ink-soft); font-size: 0.88rem; padding: 14px 0 18px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Suivi allaitement</h1>
+    <div class="sync" id="syncState">Connexion…</div>
+    <div class="status">
+      <div class="side" id="statusSide">—</div>
+      <div class="time" id="statusTime">Aucune tétée enregistrée</div>
+    </div>
+
+    <div class="buttons">
+      <button class="side-btn btn-left" id="btnLeft" onclick="record('left')" disabled>
+        <span class="badge" id="badgeLeft" style="display:none">Suggéré</span>
+        <span class="dot dot-left"></span>Gauche
+      </button>
+      <button class="side-btn btn-right" id="btnRight" onclick="record('right')" disabled>
+        <span class="badge" id="badgeRight" style="display:none">Suggéré</span>
+        <span class="dot dot-right"></span>Droit
+      </button>
+    </div>
+
+    <button class="undo" id="undoBtn" onclick="undo()" style="display:none">Annuler la dernière tétée</button>
+
+    <div class="history">
+      <h2>Historique</h2>
+      <div id="historyList"></div>
+    </div>
+  </div>
+
+<!-- SDK Firebase (compat, simple à utiliser sans outil de build) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+  // 1) Remplace ces valeurs par celles de TON projet Firebase (voir instructions).
+  const firebaseConfig = {
+    apiKey: "AIzaSyBa4uSu-pibDqtz1xLW09VYr_-a3x2QrrM",
+    authDomain: "allaitement-cf860.firebaseapp.com",
+    databaseURL: "https://allaitement-cf860-default-rtdb.firebaseio.com",
+    projectId: "allaitement-cf860",
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const historyRef = firebase.database().ref('history');
+
+  let history = []; // [{key, side, ts}], trié du plus récent au plus ancien
+
+  function record(side) {
+    historyRef.push({ side, ts: Date.now() });
+  }
+
+  function undo() {
+    if (history.length === 0) return;
+    historyRef.child(history[0].key).remove();
+  }
+
+  function relTime(ts) {
+    const diffMin = Math.round((Date.now() - ts) / 60000);
+    if (diffMin < 1) return "à l'instant";
+    if (diffMin < 60) return `il y a ${diffMin} min`;
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    return `il y a ${h}h${m > 0 ? String(m).padStart(2,'0') : ''}`;
+  }
+  function fmtClock(ts) {
+    return new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function render() {
+    const statusSide = document.getElementById('statusSide');
+    const statusTime = document.getElementById('statusTime');
+    const badgeLeft = document.getElementById('badgeLeft');
+    const badgeRight = document.getElementById('badgeRight');
+    const undoBtn = document.getElementById('undoBtn');
+    const historyList = document.getElementById('historyList');
+
+    if (history.length === 0) {
+      statusSide.textContent = '—';
+      statusTime.textContent = 'Aucune tétée enregistrée';
+      badgeLeft.style.display = 'none';
+      badgeRight.style.display = 'none';
+      undoBtn.style.display = 'none';
+      historyList.innerHTML = '<div class="empty">Appuie sur un bouton après la première tétée.</div>';
+      return;
+    }
+
+    const last = history[0];
+    statusSide.textContent = last.side === 'left' ? 'Gauche' : 'Droit';
+    statusTime.textContent = relTime(last.ts);
+    badgeLeft.style.display = last.side === 'right' ? 'block' : 'none';
+    badgeRight.style.display = last.side === 'left' ? 'block' : 'none';
+    undoBtn.style.display = 'block';
+
+    historyList.innerHTML = history.slice(0, 8).map(h => `
+      <div class="entry">
+        <span class="who"><span class="dot dot-${h.side}"></span>${h.side === 'left' ? 'Gauche' : 'Droit'}</span>
+        <span class="when">${fmtClock(h.ts)} · ${relTime(h.ts)}</span>
+      </div>
+    `).join('');
+  }
+
+  // Écoute en temps réel : dès qu'un téléphone enregistre une tétée,
+  // tous les autres téléphones ouverts sur la page se mettent à jour automatiquement.
+  historyRef.orderByChild('ts').limitToLast(20).on('value', snapshot => {
+    const list = [];
+    snapshot.forEach(child => {
+      list.push({ key: child.key, ...child.val() });
+    });
+    list.sort((a, b) => b.ts - a.ts);
+    history = list;
+    render();
+  }, error => {
+    document.getElementById('syncState').textContent = 'Erreur de connexion — vérifie ta config Firebase';
+  });
+
+  firebase.database().ref('.info/connected').on('value', snap => {
+    const ok = snap.val() === true;
+    document.getElementById('syncState').textContent = ok ? 'Synchronisé' : 'Hors ligne';
+    document.getElementById('btnLeft').disabled = !ok;
+    document.getElementById('btnRight').disabled = !ok;
+  });
+
+  setInterval(render, 30000);
+</script>
+</body>
+</html>

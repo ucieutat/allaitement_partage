@@ -67,33 +67,63 @@
   .entry .who { display: flex; align-items: center; }
   .entry .when { color: var(--ink-soft); }
   .empty { color: var(--ink-soft); font-size: 0.88rem; padding: 14px 0 18px; }
+
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tab-btn {
+    flex: 1; padding: 9px; border: none; border-radius: 12px;
+    background: var(--card); color: var(--ink-soft); font-weight: 600;
+    font-size: 0.85rem; cursor: pointer;
+  }
+  .tab-btn.active { background: var(--ink); color: var(--bg); }
+  .chart-card { background: var(--card); border-radius: 16px; padding: 14px 12px 16px; }
+  .chart-card h2 { font-size: 0.85rem; font-weight: 600; color: var(--ink-soft); margin: 0 0 10px; }
+  .legend { display: flex; gap: 16px; justify-content: center; margin-top: 10px; font-size: 0.78rem; color: var(--ink-soft); }
+  .legend span { display: flex; align-items: center; }
 </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Suivi allaitement</h1>
     <div class="sync" id="syncState">Connexion…</div>
-    <div class="status">
-      <div class="side" id="statusSide">—</div>
-      <div class="time" id="statusTime">Aucune tétée enregistrée</div>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="suivi" onclick="showTab('suivi')">Suivi</button>
+      <button class="tab-btn" data-tab="graphique" onclick="showTab('graphique')">Graphique</button>
     </div>
 
-    <div class="buttons">
-      <button class="side-btn btn-left" id="btnLeft" onclick="record('left')" disabled>
-        <span class="badge" id="badgeLeft" style="display:none">Suggéré</span>
-        <span class="dot dot-left"></span>Gauche
-      </button>
-      <button class="side-btn btn-right" id="btnRight" onclick="record('right')" disabled>
-        <span class="badge" id="badgeRight" style="display:none">Suggéré</span>
-        <span class="dot dot-right"></span>Droit
-      </button>
+    <div id="tabSuivi">
+      <div class="status">
+        <div class="side" id="statusSide">—</div>
+        <div class="time" id="statusTime">Aucune tétée enregistrée</div>
+      </div>
+
+      <div class="buttons">
+        <button class="side-btn btn-left" id="btnLeft" onclick="record('left')" disabled>
+          <span class="badge" id="badgeLeft" style="display:none">Suggéré</span>
+          <span class="dot dot-left"></span>Gauche
+        </button>
+        <button class="side-btn btn-right" id="btnRight" onclick="record('right')" disabled>
+          <span class="badge" id="badgeRight" style="display:none">Suggéré</span>
+          <span class="dot dot-right"></span>Droit
+        </button>
+      </div>
+
+      <button class="undo" id="undoBtn" onclick="undo()" style="display:none">Annuler la dernière tétée</button>
+
+      <div class="history">
+        <h2>Historique</h2>
+        <div id="historyList"></div>
+      </div>
     </div>
 
-    <button class="undo" id="undoBtn" onclick="undo()" style="display:none">Annuler la dernière tétée</button>
-
-    <div class="history">
-      <h2>Historique</h2>
-      <div id="historyList"></div>
+    <div id="tabGraphique" style="display:none">
+      <div class="chart-card">
+        <h2>Tétées par heure de la journée</h2>
+        <div id="chartContainer"><div class="empty">Chargement…</div></div>
+        <div class="legend">
+          <span><span class="dot dot-left"></span>Gauche</span>
+          <span><span class="dot dot-right"></span>Droit</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -190,6 +220,62 @@
   });
 
   setInterval(render, 30000);
+
+  // --- Onglets ---
+  function showTab(name) {
+    document.getElementById('tabSuivi').style.display = name === 'suivi' ? 'block' : 'none';
+    document.getElementById('tabGraphique').style.display = name === 'graphique' ? 'block' : 'none';
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    if (name === 'graphique') loadChart();
+  }
+
+  // --- Graphique : nuage de points (heure de la journée × jour) ---
+  function loadChart() {
+    firebase.database().ref('history').orderByChild('ts').limitToLast(200).once('value', snapshot => {
+      const entries = [];
+      snapshot.forEach(child => entries.push(child.val()));
+      const container = document.getElementById('chartContainer');
+      container.innerHTML = entries.length
+        ? buildChart(entries)
+        : '<div class="empty">Pas encore assez de données pour un graphique.</div>';
+    });
+  }
+
+  function buildChart(entries) {
+    const svgW = 320, marginLeft = 34, rowH = 20;
+    const plotW = svgW - marginLeft - 10;
+
+    const points = entries.map(e => {
+      const d = new Date(e.ts);
+      return { hour: d.getHours() + d.getMinutes() / 60, dayISO: d.toISOString().slice(0, 10), side: e.side };
+    });
+    const days = [...new Set(points.map(p => p.dayISO))].sort();
+    const dayIndex = Object.fromEntries(days.map((d, i) => [d, i]));
+    const plotH = days.length * rowH;
+    const svgH = plotH + 26;
+    const labelStep = Math.max(1, Math.ceil(days.length / 10));
+
+    let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" style="display:block">`;
+    for (let h = 0; h <= 24; h += 6) {
+      const x = marginLeft + (h / 24) * plotW;
+      svg += `<line x1="${x}" y1="0" x2="${x}" y2="${plotH}" stroke="var(--line)" stroke-width="1"/>`;
+      svg += `<text x="${x}" y="${plotH + 16}" font-size="9" fill="var(--ink-soft)" text-anchor="middle">${h}h</text>`;
+    }
+    days.forEach((day, i) => {
+      if (i % labelStep === 0) {
+        const short = day.slice(5).split('-').reverse().join('/');
+        svg += `<text x="0" y="${i * rowH + rowH / 2 + 3}" font-size="9" fill="var(--ink-soft)">${short}</text>`;
+      }
+    });
+    points.forEach(p => {
+      const x = marginLeft + (p.hour / 24) * plotW;
+      const y = dayIndex[p.dayISO] * rowH + rowH / 2;
+      const color = p.side === 'left' ? 'var(--left)' : 'var(--right)';
+      svg += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${color}" opacity="0.85"/>`;
+    });
+    svg += `</svg>`;
+    return svg;
+  }
 </script>
 </body>
 </html>

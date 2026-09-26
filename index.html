@@ -127,11 +127,10 @@
     </div>
   </div>
 
-<!-- SDK Firebase (compat, simple à utiliser sans outil de build) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
-  // 1) Remplace ces valeurs par celles de TON projet Firebase (voir instructions).
+
   const firebaseConfig = {
     apiKey: "AIzaSyBa4uSu-pibDqtz1xLW09VYr_-a3x2QrrM",
     authDomain: "allaitement-cf860.firebaseapp.com",
@@ -198,8 +197,6 @@
     `).join('');
   }
 
-  // Écoute en temps réel : dès qu'un téléphone enregistre une tétée,
-  // tous les autres téléphones ouverts sur la page se mettent à jour automatiquement.
   historyRef.orderByChild('ts').limitToLast(20).on('value', snapshot => {
     const list = [];
     snapshot.forEach(child => {
@@ -242,18 +239,34 @@
   }
 
   function buildChart(entries) {
-    const svgW = 320, marginLeft = 34, rowH = 20;
-    const plotW = svgW - marginLeft - 10;
+    const svgW = 360, marginLeft = 30, marginRight = 82, rowH = 20;
+    const plotW = svgW - marginLeft - marginRight;
 
     const points = entries.map(e => {
       const d = new Date(e.ts);
-      return { hour: d.getHours() + d.getMinutes() / 60, dayISO: d.toISOString().slice(0, 10), side: e.side };
+      return { hour: d.getHours() + d.getMinutes() / 60, dayISO: d.toISOString().slice(0, 10), side: e.side, ts: e.ts };
     });
     const days = [...new Set(points.map(p => p.dayISO))].sort();
     const dayIndex = Object.fromEntries(days.map((d, i) => [d, i]));
     const plotH = days.length * rowH;
     const svgH = plotH + 26;
     const labelStep = Math.max(1, Math.ceil(days.length / 10));
+
+    // Stats par jour : nombre de tétées + intervalle moyen entre elles
+    const byDay = {};
+    points.forEach(p => (byDay[p.dayISO] = byDay[p.dayISO] || []).push(p.ts));
+    const dayStats = {};
+    days.forEach(day => {
+      const tsList = byDay[day].slice().sort((a, b) => a - b);
+      const count = tsList.length;
+      const avgGapMin = count > 1 ? (tsList[count - 1] - tsList[0]) / (count - 1) / 60000 : NaN;
+      dayStats[day] = { count, avgGapMin };
+    });
+    function fmtGap(min) {
+      if (!isFinite(min)) return '—';
+      const h = Math.floor(min / 60), m = Math.round(min % 60);
+      return h > 0 ? `${h}h${m > 0 ? String(m).padStart(2, '0') : ''}` : `${m}min`;
+    }
 
     let svg = `<svg viewBox="0 0 ${svgW} ${svgH}" width="100%" style="display:block">`;
     for (let h = 0; h <= 24; h += 6) {
@@ -262,10 +275,14 @@
       svg += `<text x="${x}" y="${plotH + 16}" font-size="9" fill="var(--ink-soft)" text-anchor="middle">${h}h</text>`;
     }
     days.forEach((day, i) => {
+      const y = i * rowH + rowH / 2;
       if (i % labelStep === 0) {
         const short = day.slice(5).split('-').reverse().join('/');
-        svg += `<text x="0" y="${i * rowH + rowH / 2 + 3}" font-size="9" fill="var(--ink-soft)">${short}</text>`;
+        svg += `<text x="0" y="${y + 3}" font-size="9" fill="var(--ink-soft)">${short}</text>`;
       }
+      const s = dayStats[day];
+      const summary = `${s.count} · Ø ${fmtGap(s.avgGapMin)}`;
+      svg += `<text x="${svgW}" y="${y + 3}" font-size="8.5" fill="var(--ink-soft)" text-anchor="end">${summary}</text>`;
     });
     points.forEach(p => {
       const x = marginLeft + (p.hour / 24) * plotW;

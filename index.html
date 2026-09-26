@@ -233,7 +233,7 @@
   function loadChart() {
     firebase.database().ref('history').orderByChild('ts').limitToLast(200).once('value', snapshot => {
       const entries = [];
-      snapshot.forEach(child => entries.push(child.val()));
+      snapshot.forEach(child => { entries.push(child.val()); });
       const container = document.getElementById('chartContainer');
       container.innerHTML = entries.length
         ? buildChart(entries)

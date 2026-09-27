@@ -62,11 +62,31 @@
   .entry {
     display: flex; justify-content: space-between; align-items: center;
     padding: 10px 0; border-top: 1px solid var(--line); font-size: 0.92rem;
+    cursor: pointer;
   }
   .entry:first-of-type { border-top: none; }
   .entry .who { display: flex; align-items: center; }
   .entry .when { color: var(--ink-soft); }
   .empty { color: var(--ink-soft); font-size: 0.88rem; padding: 14px 0 18px; }
+
+  .overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    align-items: center; justify-content: center; padding: 20px; z-index: 10;
+  }
+  .modal { background: var(--card); border-radius: 18px; padding: 20px; width: 100%; max-width: 320px; }
+  .modal h3 { margin: 0 0 14px; font-size: 0.95rem; }
+  .modal input[type="datetime-local"] {
+    width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); font-size: 0.95rem; margin-bottom: 16px;
+  }
+  .modal-actions { display: flex; gap: 10px; }
+  .modal-actions button {
+    flex: 1; border: none; border-radius: 12px; padding: 11px; font-weight: 700;
+    font-size: 0.88rem; cursor: pointer;
+  }
+  .modal-save { background: var(--right); color: #fff; }
+  .modal-cancel { background: var(--line); color: var(--ink); }
+  .modal-delete { display: block; width: 100%; margin-top: 10px; background: none; border: none; color: var(--left); font-size: 0.82rem; cursor: pointer; }
 
   .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
   .tab-btn {
@@ -127,10 +147,22 @@
     </div>
   </div>
 
+  <div class="overlay" id="editOverlay">
+    <div class="modal">
+      <h3>Modifier l'heure de cette tétée</h3>
+      <input type="datetime-local" id="editTimeInput">
+      <div class="modal-actions">
+        <button class="modal-cancel" onclick="closeEditModal()">Annuler</button>
+        <button class="modal-save" onclick="saveEdit()">Enregistrer</button>
+      </div>
+      <button class="modal-delete" onclick="deleteEdit()">Supprimer cette tétée</button>
+    </div>
+  </div>
+
+<!-- SDK Firebase (compat, simple à utiliser sans outil de build) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
-
   const firebaseConfig = {
     apiKey: "AIzaSyBa4uSu-pibDqtz1xLW09VYr_-a3x2QrrM",
     authDomain: "allaitement-cf860.firebaseapp.com",
@@ -190,14 +222,45 @@
     undoBtn.style.display = 'block';
 
     historyList.innerHTML = history.slice(0, 8).map(h => `
-      <div class="entry">
+      <div class="entry" onclick="openEdit('${h.key}', ${h.ts})">
         <span class="who"><span class="dot dot-${h.side}"></span>${h.side === 'left' ? 'Gauche' : 'Droit'}</span>
         <span class="when">${fmtClock(h.ts)} · ${relTime(h.ts)}</span>
       </div>
     `).join('');
   }
 
-  historyRef.orderByChild('ts').limitToLast(20).on('value', snapshot => {
+  let editingKey = null;
+
+  function toLocalInputValue(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function openEdit(key, ts) {
+    editingKey = key;
+    document.getElementById('editTimeInput').value = toLocalInputValue(new Date(ts));
+    document.getElementById('editOverlay').style.display = 'flex';
+  }
+
+  function closeEditModal() {
+    editingKey = null;
+    document.getElementById('editOverlay').style.display = 'none';
+  }
+
+  function saveEdit() {
+    const val = document.getElementById('editTimeInput').value;
+    if (!val || !editingKey) return;
+    historyRef.child(editingKey).update({ ts: new Date(val).getTime() });
+    closeEditModal();
+  }
+
+  function deleteEdit() {
+    if (!editingKey) return;
+    historyRef.child(editingKey).remove();
+    closeEditModal();
+  }
+
+   historyRef.orderByChild('ts').limitToLast(20).on('value', snapshot => {
     const list = [];
     snapshot.forEach(child => {
       list.push({ key: child.key, ...child.val() });
